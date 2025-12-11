@@ -16,8 +16,8 @@ def main():
     train = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\train.csv")
     test = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\test.csv")
 
-    train_preprocessed, training_columns = preprocess(train, train=True)
-    test_preprocessed, _ = preprocess(test, train=False, training_columns=training_columns)
+    train_preprocessed, training_columns, imputation_values, scaler = preprocess(train, train=True)
+    test_preprocessed, _, _, _ = preprocess(test, train=False, training_columns=training_columns, imputation_values=imputation_values, scaler=scaler)
 
     train_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)
     test_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_test.csv", index=False)
@@ -109,8 +109,8 @@ def evaluate(model, X_test, y_test):
     y_pred = model.predict(X_test)
 
     print("Accuracy:", accuracy_score(y_test, y_pred)*100)
-    # print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
-    # print("Classification Report:\n", classification_report(y_test, y_pred))
+    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+    print("Classification Report:\n", classification_report(y_test, y_pred))
 
 
 if __name__ == "__main__":

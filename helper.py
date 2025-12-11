@@ -9,14 +9,30 @@ import matplotlib.pyplot as plt
 
 
 
-def preprocess(df, train=True, training_columns=[]):
-    
+def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None):
 
-    numberical_columns=['rating','Processor_Series','Core_Count', 'Clock_Speed_GHz','RAM Size GB','Storage Size GB','battery_capacity', 'fast_charging_power' , 'Screen_Size','Resolution_Width','Resolution_Height','Refresh_Rate','primary_rear_camera_mp','num_rear_cameras','primary_front_camera_mp','num_front_cameras']
-    for y in numberical_columns:
+    numerical_columns=['rating','Processor_Series','Core_Count', 'Clock_Speed_GHz','RAM Size GB','Storage Size GB','battery_capacity', 'fast_charging_power' , 'Screen_Size','Resolution_Width','Resolution_Height','Refresh_Rate','primary_rear_camera_mp','num_rear_cameras','primary_front_camera_mp','num_front_cameras']
+
+    if train:
+        imputation_values = {}
+    elif imputation_values is None:
+        raise ValueError("imputation_values must be provided when train=False!")
+
+    for y in numerical_columns:
         df[y] = pd.to_numeric(df[y], errors="coerce")
-        mean_value = df[y].mean()
+
+        if train:
+            # LEARN: Calculate mean from training data
+            mean_value = df[y].mean()
+            # SAVE: Store it
+            imputation_values[y] = mean_value
+        else:
+            # APPLY: Use the stored mean (default to 0 if missing)
+            mean_value = imputation_values.get(y, 0)
+
         df[y] = df[y].fillna(mean_value)
+
+    
 
     df = df.apply(lambda col: col.str.lower() if col.dtype == "object" else col)
 
@@ -63,13 +79,24 @@ def preprocess(df, train=True, training_columns=[]):
 
 
     # Standard Scaling
-    numberical_columns += ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded"]
-    scaler = StandardScaler()
-    df[numberical_columns] = scaler.fit_transform(df[numberical_columns])
-
+    cols_to_scale = numerical_columns + ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded"]
     
+    if train:
+        # LEARN: Create new scaler and fit it on training data
+        scaler = StandardScaler()
+        df[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
+    else:
+        # APPLY: Use the scaler learned from training (Safety check)
+        if scaler is None:
+             raise ValueError("Scaler must be provided when train=False!")
+        
+        # Transform test data using the existing scaler's stats
+        df[cols_to_scale] = scaler.transform(df[cols_to_scale])
+
     # Price Binary Encoding
-    df[f"price"] = df["price"].map({'expensive': 1, 'non-expensive': 0})
+    if "price" in df.columns:
+            df["price"] = df["price"].map({'expensive': 1, 'non-expensive': 0})
+
 
     #analysis(df)
 
@@ -90,7 +117,7 @@ def preprocess(df, train=True, training_columns=[]):
     df = df.drop(manual_encoding+unrelated_features+["RAM Tier", "os_version", "memory_card_size", "Performance_Tier"], axis=1)
 
 
-    return df, training_columns
+    return df, training_columns, imputation_values, scaler
 
 
 def analysis(df):
