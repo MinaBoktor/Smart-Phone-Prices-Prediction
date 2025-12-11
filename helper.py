@@ -37,7 +37,7 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     df = df.apply(lambda col: col.str.lower() if col.dtype == "object" else col)
 
     # Manual Binary Encoding
-    manual_encoding = ["NFC", "IR_Blaster", "memory_card_support", "5G", ]
+    manual_encoding = ["NFC", "memory_card_support", "5G", ]
     for y in manual_encoding:
         df[f"{y}_encoded"] = df[y].map({'yes': 1, 'no': 0})
 
@@ -113,7 +113,7 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
 
 
     # Dropping Unnecessary Columns which were encoded and unrelated features
-    unrelated_features = ["rating", "Processor_Series", "Vo5G", "4G", "os_name", "Dual_Sim", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "os_version_minor", "IR_Blaster_encoded"]
+    unrelated_features = ["rating", "Processor_Series", "Vo5G", "4G", "os_name", "Dual_Sim", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "os_version_minor", "IR_Blaster"]
     df = df.drop(manual_encoding+unrelated_features+["RAM Tier", "os_version", "memory_card_size", "Performance_Tier"], axis=1)
 
 

@@ -93,6 +93,7 @@ def random_forest(X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
+
 def decision_tree(X_train, y_train):
     model = DecisionTreeClassifier(
         max_depth=20, 
