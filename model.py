@@ -8,25 +8,27 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.tree import DecisionTreeClassifier
 from helper import preprocess
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def main():
     train = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\train.csv")
     test = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\test.csv")
 
-    train, training_columns = preprocess(train, train=True)
-    test, _ = preprocess(test, train=False, training_columns=training_columns)
+    train_preprocessed, training_columns = preprocess(train, train=True)
+    test_preprocessed, _ = preprocess(test, train=False, training_columns=training_columns)
 
-    train.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)
-    test.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_test.csv", index=False)
+    train_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)
+    test_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_test.csv", index=False)
 
     # For training
-    X_train = train.drop(["price"], axis=1)
-    y_train = train["price"]
+    X_train = train_preprocessed.drop(["price"], axis=1)
+    y_train = train_preprocessed["price"]
 
     # For testing
-    X_test = test.drop("price", axis=1)
-    y_test = test["price"]
+    X_test = test_preprocessed.drop("price", axis=1)
+    y_test = test_preprocessed["price"]
 
     model = logistic(X_train, y_train)
     print("Logistic Regression Results:")
@@ -57,10 +59,10 @@ def logistic(X_train, y_train):
 
 def SVM(X_train, y_train):
     model = SVC(
-        kernel='poly',      # 'linear', 'poly', 'rbf', 'sigmoid'
-        C=1.0,             # regularization parameter
-        gamma='scale',     # kernel coefficient ('scale' is default)
-        probability=True   # if you want predicted probabilities
+        kernel='poly',
+        C=1.0,
+        gamma='scale',
+        probability=True
     )
 
     model.fit(X_train, y_train)
@@ -69,22 +71,36 @@ def SVM(X_train, y_train):
 
 def KNN(X_train, y_train):
     model = KNeighborsClassifier(
-        n_neighbors=3,   # number of neighbors (tune this)
-        weights='distance', # 'uniform' or 'distance'
-        metric='minkowski', # distance metric ('euclidean' if p=2)
-        p=2              # parameter for Minkowski (p=2 → Euclidean)
-    )
+            n_neighbors=3,
+            weights='uniform',
+            metric='manhattan',
+            algorithm='auto'
+        )
 
     model.fit(X_train, y_train)
     return model
 
 def random_forest(X_train, y_train):
-    model = RandomForestClassifier(n_estimators=4, random_state=0)
+    model = RandomForestClassifier(
+        n_estimators=100,
+        criterion='entropy',
+        bootstrap=False,
+        max_depth=40,
+        min_samples_split=2,
+        min_samples_leaf=1,
+        random_state=42
+    )
     model.fit(X_train, y_train)
     return model
 
 def decision_tree(X_train, y_train):
-    model = DecisionTreeClassifier(max_depth=4, random_state=0)
+    model = DecisionTreeClassifier(
+        max_depth=20, 
+        min_samples_split=2, 
+        min_samples_leaf=1, 
+        criterion='entropy', 
+        random_state=42
+    )
     model.fit(X_train, y_train)
     return model
 
