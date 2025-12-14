@@ -10,6 +10,7 @@ from sklearn.tree import DecisionTreeClassifier
 from helper import preprocess
 import matplotlib.pyplot as plt
 import seaborn as sns
+from xgboost import XGBClassifier
 
 
 def main():
@@ -48,6 +49,10 @@ def main():
 
     model = decision_tree(X_train, y_train)
     print("Decision Tree Results:")
+    evaluate(model, X_test, y_test)
+
+    model = xgboost_model(X_train, y_train)
+    print("Xgboost Results:")
     evaluate(model, X_test, y_test)
 
 
@@ -105,13 +110,24 @@ def decision_tree(X_train, y_train):
     model.fit(X_train, y_train)
     return model
 
+def xgboost_model(X_train, y_train):
+    model = XGBClassifier(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=5,
+        scale_pos_weight=1.5,  # A gentler balance than 'balanced'
+        random_state=42
+    )
+    model.fit(X_train, y_train)
+    return model
+
 
 def evaluate(model, X_test, y_test):
     y_pred = model.predict(X_test)
 
     print("Accuracy:", accuracy_score(y_test, y_pred)*100)
-    print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
-    print("Classification Report:\n", classification_report(y_test, y_pred))
+    #print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
+    #print("Classification Report:\n", classification_report(y_test, y_pred))
 
 
 if __name__ == "__main__":

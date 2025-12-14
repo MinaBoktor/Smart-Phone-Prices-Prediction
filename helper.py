@@ -1,4 +1,5 @@
 import pandas as pd
+import numpy as np
 from sklearn.preprocessing import OrdinalEncoder
 from sklearn.preprocessing import StandardScaler
 import pandas as pd
@@ -9,7 +10,18 @@ import matplotlib.pyplot as plt
 
 
 
+
+
 def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None):
+
+    #Binaray_columns_versus_price_(df)
+    #unique(df)
+
+    # Price Binary Encoding
+    if "price" in df.columns:
+            df["price"] = df["price"].map({'expensive': 1, 'non-expensive': 0})
+
+
 
     numerical_columns=['rating','Processor_Series','Core_Count', 'Clock_Speed_GHz','RAM Size GB','Storage Size GB','battery_capacity', 'fast_charging_power' , 'Screen_Size','Resolution_Width','Resolution_Height','Refresh_Rate','primary_rear_camera_mp','num_rear_cameras','primary_front_camera_mp','num_front_cameras']
 
@@ -22,17 +34,13 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
         df[y] = pd.to_numeric(df[y], errors="coerce")
 
         if train:
-            # LEARN: Calculate mean from training data
             mean_value = df[y].mean()
-            # SAVE: Store it
             imputation_values[y] = mean_value
         else:
-            # APPLY: Use the stored mean (default to 0 if missing)
             mean_value = imputation_values.get(y, 0)
 
         df[y] = df[y].fillna(mean_value)
 
-    
 
     df = df.apply(lambda col: col.str.lower() if col.dtype == "object" else col)
 
@@ -58,7 +66,6 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     df["os_version_patch"] = split_cols[2].fillna(0).astype(int)
 
     # Ordinal Encoding for RAM Tier
-    ordinal_encoding = ["RAM Tier"]
     encoder = OrdinalEncoder(categories=[
         ["unknown", "budget", "mid-range", "high-end", "flagship"],
     ])
@@ -78,6 +85,44 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     df["memory_card_size"] = df["memory_card_size"].apply(convert_storage)
 
 
+    # Handling unrealistic inputs by setting lower limits
+    lower_limits = {
+        'RAM Size GB': 0.5,
+        'Storage Size GB': 4,
+        }
+
+    for col, limit in lower_limits.items():
+        df[col] = df[col].clip(lower=limit, upper=None)
+
+    upper_limits = {
+        'battery_capacity': 10000,
+    }
+
+    for col, limit in upper_limits.items():
+        df[col] = df[col].clip(lower=None, upper=limit)
+
+
+
+    # Outlier Capping for numerical columns using IQR method
+    cols_to_cap = ['rating', 'Processor_Series']
+
+    for col in cols_to_cap:
+        Q1 = df[col].quantile(0.25)
+        Q3 = df[col].quantile(0.75)
+        IQR = Q3 - Q1
+
+
+        lower_bound = Q1 - 1.5 * IQR
+        upper_bound = Q3 + 1.5 * IQR
+
+        print(f"Capping outliers in {col}: Lower Bound = {lower_bound}, Upper Bound = {upper_bound}")
+
+        df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
+
+    #df.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_outliers.csv", index=False)
+
+    
+
     # Standard Scaling
     cols_to_scale = numerical_columns + ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded"]
     
@@ -92,11 +137,6 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
         
         # Transform test data using the existing scaler's stats
         df[cols_to_scale] = scaler.transform(df[cols_to_scale])
-
-    # Price Binary Encoding
-    if "price" in df.columns:
-            df["price"] = df["price"].map({'expensive': 1, 'non-expensive': 0})
-
 
     #analysis(df)
 
@@ -113,12 +153,42 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
 
 
     # Dropping Unnecessary Columns which were encoded and unrelated features
-    unrelated_features = ["rating", "Processor_Series", "Vo5G", "4G", "os_name", "Dual_Sim", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "os_version_minor", "IR_Blaster"]
+    unrelated_features = ["rating", "Processor_Series", "os_name", "Dual_Sim", "Vo5G", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "IR_Blaster", "4G",  ]
     df = df.drop(manual_encoding+unrelated_features+["RAM Tier", "os_version", "memory_card_size", "Performance_Tier"], axis=1)
 
 
     return df, training_columns, imputation_values, scaler
 
+
+def Binaray_columns_versus_price_(df):
+    target_col = 'price'
+    feature_cols = ['Dual_Sim', '4G', '5G', 'Vo5G', 'NFC', 'memory_card_support', 'IR_Blaster']
+
+    # Print a Header for readability
+    print(f"{'Feature':<15} | {'Yes -> Expensive':<18} | {'No -> Non-Expensive':<18}")
+    print("-" * 60)
+
+    for feature in feature_cols:
+        # Calculate percentages
+        ct = pd.crosstab(df[feature], df[target_col], normalize='index')
+
+        # Extract values safely (returns 0 if specific key is missing)
+        yes_score = ct.loc['Yes', 'expensive'] if 'Yes' in ct.index else 0
+        no_score = ct.loc['No', 'non-expensive'] if 'No' in ct.index else 0
+
+        # Print immediately
+        print(f"{feature:<15} | {yes_score:.1%}              | {no_score:.1%}")
+
+def unique(df):
+    # Set pandas to display the full list without truncating (optional but helpful)
+    pd.set_option('display.max_rows', None)
+    pd.set_option('display.max_colwidth', None)
+
+    for col in df.columns:
+        print(f"--- Column: {col} ---")
+        # This prints the full array of unique values
+        print(df[col].unique()) 
+        print("\n") # Adds a blank line for readability
 
 def analysis(df):
 
@@ -149,5 +219,5 @@ def analysis(df):
 
 if __name__ == "__main__":
     df=pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\train.csv")
-    df, _ = preprocess(df, train=True)
+    df, _, _, _ = preprocess(df, train=True)
     df.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)
