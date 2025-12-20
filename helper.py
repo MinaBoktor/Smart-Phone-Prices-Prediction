@@ -5,9 +5,12 @@ from sklearn.preprocessing import StandardScaler
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
+from sklearn.feature_selection import SequentialFeatureSelector
+from sklearn.ensemble import RandomForestClassifier
+from performance_tier_prediction import impute_performance_tier
 
 
-def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None):
+def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None, imputer_artifacts=None):
 
     #Binaray_columns_versus_price_(df)
     #unique(df)
@@ -39,8 +42,10 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
 
     df = df.apply(lambda col: col.str.lower() if col.dtype == "object" else col)
 
+    df, imputer_artifacts = impute_performance_tier(df, artifacts=imputer_artifacts)
+
     # Manual Binary Encoding
-    manual_encoding = ["NFC", "memory_card_support", "5G", ]
+    manual_encoding = ["NFC", "memory_card_support", "5G", "IR_Blaster", "4G", "Dual_Sim", "Vo5G"]
     for y in manual_encoding:
         df[f"{y}_encoded"] = df[y].map({'yes': 1, 'no': 0})
 
@@ -61,12 +66,16 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     df["os_version_patch"] = split_cols[2].fillna(0).astype(int)
 
     # Ordinal Encoding for RAM Tier
-    encoder = OrdinalEncoder(categories=[
+    ram_encoder = OrdinalEncoder(categories=[
         ["unknown", "budget", "mid-range", "high-end", "flagship"],
     ])
 
-    df["RAM Tier_encoded"] = encoder.fit_transform(df[["RAM Tier"]])
-    df["Performance_Tier_encoded"] = encoder.fit_transform(df[["Performance_Tier"]])
+    tier_encoder = OrdinalEncoder(categories=[
+        ["unknown", "budget", "mid-range", "high-end", "flagship"],
+    ])
+
+    df["RAM Tier_encoded"] = ram_encoder.fit_transform(df[["RAM Tier"]])
+    df["Performance_Tier_encoded"] = tier_encoder.fit_transform(df[["Performance_Tier"]])
 
 
     # Converting into GBs in memory_card_size
@@ -90,38 +99,10 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     for col, limit in lower_limits.items():
         df[col] = df[col].clip(lower=limit, upper=None)
 
-    upper_limits = {
-        'battery_capacity': 10000,
-    }
-
-    for col, limit in upper_limits.items():
-        df[col] = df[col].clip(lower=None, upper=limit)
-
-
-
-    # Outlier Capping for numerical columns using IQR method
-    cols_to_cap = ['rating', 'Processor_Series']
-
-    for col in cols_to_cap:
-        Q1 = df[col].quantile(0.25)
-        Q3 = df[col].quantile(0.75)
-        IQR = Q3 - Q1
-
-
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-
-        print(f"Capping outliers in {col}: Lower Bound = {lower_bound}, Upper Bound = {upper_bound}")
-
-        df[col] = df[col].clip(lower=lower_bound, upper=upper_bound)
-
-    #df.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_outliers.csv", index=False)
-
-    
 
     # Standard Scaling
     cols_to_scale = numerical_columns + ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded", "Performance_Tier_encoded", "primary_front_camera_mp"]
-    
+
     if train:
         scaler = StandardScaler()
         df[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
@@ -133,7 +114,7 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     #analysis(df)
 
     # One Hot Key Encoding (The condition train indicates whether we are processing training data or test data)
-    one_hot_key = ["Processor_Brand", "Notch_Type", "brand"]
+    one_hot_key = ["Processor_Brand", "Notch_Type", "brand", "os_name"]
     df = pd.get_dummies(df, columns=one_hot_key, dtype=int)
     if train:
         training_columns = df.columns.tolist()
@@ -145,11 +126,11 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
 
 
     # Dropping Unnecessary Columns which were encoded and unrelated features
-    unrelated_features = ["rating", "Processor_Series", "os_name", "Dual_Sim", "Vo5G", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "IR_Blaster", "4G", "Performance_Tier_encoded"]
+    unrelated_features = []
     df = df.drop(manual_encoding+unrelated_features+["RAM Tier", "os_version", "memory_card_size", "Performance_Tier"], axis=1)
 
 
-    return df, training_columns, imputation_values, scaler
+    return df, training_columns, imputation_values, scaler, imputer_artifacts
 
 
 def Binaray_columns_versus_price_(df):
@@ -171,6 +152,7 @@ def Binaray_columns_versus_price_(df):
         # Print immediately
         print(f"{feature:<15} | {yes_score:.1%}              | {no_score:.1%}")
 
+
 def unique(df):
     # Set pandas to display the full list without truncating (optional but helpful)
     pd.set_option('display.max_rows', None)
@@ -181,6 +163,7 @@ def unique(df):
         # This prints the full array of unique values
         print(df[col].unique()) 
         print("\n") # Adds a blank line for readability
+
 
 def analysis(df):
 

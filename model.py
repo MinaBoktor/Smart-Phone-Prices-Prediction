@@ -1,184 +1,250 @@
-import pandas as pd
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
-from sklearn.svm import SVC
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.tree import DecisionTreeClassifier
-from helper import preprocess
-import matplotlib.pyplot as plt
-import seaborn as sns
-from xgboost import XGBClassifier
-from sklearn.inspection import permutation_importance
+import sys
+import os
+import threading
+import time
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                             QPushButton, QTextEdit, QStackedWidget, QLabel)
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
+from PyQt5.QtGui import QImage, QPixmap
 
+# --- FFPyPlayer for Audio/Video ---
+from ffpyplayer.player import MediaPlayer
 
-def main():
-    train = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\train.csv")
-    test = pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\test.csv")
+import model 
 
-    train_preprocessed, training_columns, imputation_values, scaler = preprocess(train, train=True)
-    test_preprocessed, _, _, _ = preprocess(test, train=False, training_columns=training_columns, imputation_values=imputation_values, scaler=scaler)
+# --- 1. Buffered Output Redirector (Fixes Text Lag) ---
+class StreamRedirector(QObject):
+    # We no longer emit signal on every write. We buffer it.
+    def __init__(self):
+        super().__init__()
+        self.buffer = ""
+        self.lock = threading.Lock()
 
-    train_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)
-    test_preprocessed.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_test.csv", index=False)
+    def write(self, text):
+        with self.lock:
+            self.buffer += str(text)
 
-    # For training
-    X_train = train_preprocessed.drop(["price"], axis=1)
-    y_train = train_preprocessed["price"]
+    def flush(self):
+        pass
+        
+    def read_and_clear(self):
+        with self.lock:
+            data = self.buffer
+            self.buffer = ""
+        return data
 
-    # For testing
-    X_test = test_preprocessed.drop("price", axis=1)
-    y_test = test_preprocessed["price"]
-
-    model = logistic(X_train, y_train)
-    print("Logistic Regression Results:")
-    evaluate(model, X_test, y_test)
-
-    model = SVM(X_train, y_train)
-    print("SVM Results:")
-    evaluate(model, X_test, y_test)
-
-    model = KNN(X_train, y_train)
-    print(f"KNN Results:")
-    evaluate(model, X_test, y_test)
-
-    visualize_knn_importance(model, X_test, y_test)
-
-    #visualize_camera_vs_price(train)
-
-
-    model = random_forest(X_train, y_train)
-    print("Random Forest Results:")
-    evaluate(model, X_test, y_test)
-
-    model = decision_tree(X_train, y_train)
-    print("Decision Tree Results:")
-    evaluate(model, X_test, y_test)
-
-    model = xgboost_model(X_train, y_train)
-    print("Xgboost Results:")
-    evaluate(model, X_test, y_test)
-
-
-def logistic(X_train, y_train):
-    model = LogisticRegression(max_iter=1000, random_state=0, solver='liblinear')
-    model.fit(X_train, y_train)
-    return model
-
-
-def SVM(X_train, y_train):
-    model = SVC(
-        kernel='poly',
-        C=1.0,
-        gamma='scale',
-        probability=True
-    )
-
-    model.fit(X_train, y_train)
-    return model
-
-
-def KNN(X_train, y_train, metric='manhattan'):
-    model = KNeighborsClassifier(
-            n_neighbors=3,
-            weights='uniform',
-            metric=metric,
-            algorithm='auto'
-        )
-
-    model.fit(X_train, y_train)
-    return model
-
-def random_forest(X_train, y_train):
-    model = RandomForestClassifier(
-        n_estimators=100,
-        criterion='entropy',
-        bootstrap=False,
-        max_depth=40,
-        min_samples_split=2,
-        min_samples_leaf=1,
-        random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model
-
-
-def decision_tree(X_train, y_train):
-    model = DecisionTreeClassifier(
-        max_depth=20, 
-        min_samples_split=2, 
-        min_samples_leaf=1, 
-        criterion='entropy', 
-        random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model
-
-def xgboost_model(X_train, y_train):
-    model = XGBClassifier(
-        n_estimators=200,
-        learning_rate=0.05,
-        max_depth=5,
-        scale_pos_weight=1.5,  # A gentler balance than 'balanced'
-        random_state=42
-    )
-    model.fit(X_train, y_train)
-    return model
-
-
-def evaluate(model, X_test, y_test):
-    y_pred = model.predict(X_test)
-    print("Accuracy:", accuracy_score(y_test, y_pred)*100)
-    #print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
-    #print("Classification Report:\n", classification_report(y_test, y_pred))
-
-
-def visualize_knn_importance(model, X_test, y_test):
-    print("Calculating KNN Permutation Importance... (this may take a moment)")
+# --- 2. Worker Thread ---
+class TrainingWorker(QThread):
+    finished_signal = pyqtSignal()
     
-    # Calculate permutation importance
-    results = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42, n_jobs=-1)
-    
-    # Create a DataFrame
-    importance_df = pd.DataFrame({
-        'Feature': X_test.columns,
-        'Importance': results.importances_mean
-    })
-    
-    # Sort by importance and TAKE ONLY THE TOP 20
-    top_20 = importance_df.sort_values(by='Importance', ascending=False).head(20)
-    
-    # Plot
-    plt.figure(figsize=(10, 8))  # Increased height slightly
-    sns.barplot(x='Importance', y='Feature', data=top_20, palette='viridis')
-    plt.title('Top 20 Features driving Price (KNN)')
-    plt.xlabel('Importance (Drop in Accuracy)')
-    plt.tight_layout()
-    plt.show()
+    def run(self):
+        try:
+            print(">>> SYSTEM: Core Protocols Engaged...", flush=True)
+            print(">>> ALLOCATING RESOURCES: Please wait...", flush=True)
+            # Short sleep to let video start smoothly before heavy load
+            time.sleep(1) 
+            model.main()
+        except Exception as e:
+            print(f"CRITICAL ERROR: {e}", flush=True)
+        finally:
+            self.finished_signal.emit()
 
+# --- 3. High-Performance Video Widget ---
+class FFVideoWidget(QLabel):
+    video_finished = pyqtSignal()
 
+    def __init__(self):
+        super().__init__()
+        self.setAlignment(Qt.AlignCenter)
+        self.setStyleSheet("background-color: black;")
+        self.player = None
+        
+        # We poll faster (30ms) to catch frames immediately
+        self.timer = QTimer()
+        self.timer.setInterval(30) 
+        self.timer.timeout.connect(self.update_frame)
 
+    def play(self, path):
+        self.stop()
+        
+        # 'out_fmt': 'rgb24' is fastest for Qt conversion
+        ff_opts = {'out_fmt': 'rgb24'}
+        try:
+            self.player = MediaPlayer(path, ff_opts=ff_opts)
+            self.timer.start()
+        except Exception as e:
+            print(f"Video Error: {e}")
+            self.video_finished.emit()
 
-    # Print the text version too, just in case
-    print("\n--- Top 10 Features ---")
-    print(top_20.head(10))
+    def update_frame(self):
+        if self.player is None:
+            return
 
+        # Grab frame
+        frame, val = self.player.get_frame()
 
+        if val == 'eof':
+            self.stop()
+            self.video_finished.emit()
+            return
+        
+        if frame is not None:
+            img, t = frame
+            w, h = img.get_size()
+            
+            # Fast raw data access
+            data = img.to_bytearray()[0]
+            
+            # Create QImage
+            qimg = QImage(data, w, h, QImage.Format_RGB888)
+            
+            # Scale and Set
+            pixmap = QPixmap.fromImage(qimg).scaled(
+                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.setPixmap(pixmap)
 
+    def stop(self):
+        self.timer.stop()
+        if self.player:
+            self.player.close_player()
+            self.player = None
+        self.clear()
 
-def visualize_camera_vs_price(df):
-    plt.figure(figsize=(10, 6))
-    
-    # We use a boxplot to see the price range for each Camera MP count
-    sns.boxplot(x='primary_front_camera_mp', y='price', data=df)
-    
-    plt.title('Does a Better Selfie Camera Mean a Higher Price?')
-    plt.xlabel('Front Camera Megapixels')
-    plt.ylabel('Price Category')
-    plt.xticks(rotation=45)
-    plt.grid(axis='y', linestyle='--', alpha=0.7)
-    plt.show()
+# --- 4. Main Application ---
+class AdvancedApp(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Smart Phone Price Predictor - AI Core")
+        self.resize(1000, 700)
+        
+        self.setStyleSheet("""
+            QMainWindow { background-color: #0f0f0f; }
+            QPushButton {
+                background-color: #007acc; color: white; border: none;
+                padding: 15px; font-size: 16px; font-weight: bold; border-radius: 5px;
+            }
+            QPushButton:hover { background-color: #005f9e; }
+            QPushButton:disabled { background-color: #333; color: #555; }
+            QTextEdit {
+                background-color: #1e1e1e; color: #00ff00; font-family: Consolas, Monospace;
+                font-size: 14px; border: 1px solid #333;
+            }
+            QLabel { color: white; font-size: 24px; font-weight: bold; }
+        """)
 
+        self.central_stack = QStackedWidget()
+        self.setCentralWidget(self.central_stack)
+
+        # Layers
+        self.video_widget = FFVideoWidget()
+        self.video_widget.video_finished.connect(self.on_media_finished)
+        self.central_stack.addWidget(self.video_widget)
+
+        self.app_container = QWidget()
+        self.app_layout = QVBoxLayout(self.app_container)
+        
+        self.header_label = QLabel("NEURAL NETWORK COMMAND CENTER")
+        self.header_label.setAlignment(Qt.AlignCenter)
+        self.app_layout.addWidget(self.header_label)
+
+        self.terminal_display = QTextEdit()
+        self.terminal_display.setReadOnly(True)
+        self.app_layout.addWidget(self.terminal_display)
+
+        self.train_btn = QPushButton("INITIALIZE MODEL TRAINING")
+        self.train_btn.clicked.connect(self.start_training)
+        self.app_layout.addWidget(self.train_btn)
+
+        self.central_stack.addWidget(self.app_container)
+
+        self.state = "INTRO"
+        self.force_close = False
+
+        # --- SETUP BUFFERED LOGGING ---
+        self.redirector = StreamRedirector()
+        sys.stdout = self.redirector
+        
+        # GUI Timer to flush text buffer every 100ms
+        self.log_timer = QTimer()
+        self.log_timer.timeout.connect(self.process_logs)
+        self.log_timer.start(100)
+
+        # START
+        self.play_video("HALO.mp4")
+
+    def play_video(self, filename):
+        path = os.path.abspath(filename)
+        if os.path.exists(path):
+            self.central_stack.setCurrentIndex(0)
+            self.video_widget.play(path)
+        else:
+            print(f"Warning: {filename} missing.")
+            self.on_media_finished()
+
+    def on_media_finished(self):
+        if self.state == "INTRO":
+            self.show_app()
+        elif self.state == "TRAINING":
+            # Loop loading video if worker is still running
+            if self.worker.isRunning():
+                self.play_video("FETCH.mp4")
+            else:
+                self.on_training_finished()
+        elif self.state == "EXIT":
+            self.close_application()
+
+    def show_app(self):
+        self.state = "APP"
+        self.video_widget.stop()
+        self.central_stack.setCurrentIndex(1)
+
+    def start_training(self):
+        self.state = "TRAINING"
+        self.train_btn.setEnabled(False)
+        self.train_btn.setText("TRAINING IN PROGRESS...")
+        
+        self.play_video("FETCH.mp4")
+        
+        self.worker = TrainingWorker()
+        self.worker.finished_signal.connect(self.on_training_finished)
+        self.worker.start()
+
+    def on_training_finished(self):
+        # Only stop if we aren't already stopping
+        if self.state == "TRAINING":
+            self.state = "APP"
+            self.video_widget.stop()
+            self.central_stack.setCurrentIndex(1)
+            self.train_btn.setEnabled(True)
+            self.train_btn.setText("INITIALIZE MODEL TRAINING")
+            print("\n>>> SYSTEM: Training Sequence Complete.")
+
+    def process_logs(self):
+        """Reads buffer and updates GUI in one go"""
+        text = self.redirector.read_and_clear()
+        if text:
+            cursor = self.terminal_display.textCursor()
+            cursor.movePosition(cursor.End)
+            cursor.insertText(text)
+            self.terminal_display.setTextCursor(cursor)
+            self.terminal_display.ensureCursorVisible()
+
+    def closeEvent(self, event):
+        if self.force_close:
+            event.accept()
+        else:
+            event.ignore()
+            self.state = "EXIT"
+            self.play_video("BYE.mp4")
+
+    def close_application(self):
+        self.force_close = True
+        self.video_widget.stop()
+        self.close()
 
 if __name__ == "__main__":
-    main()
+    app = QApplication(sys.argv)
+    window = AdvancedApp()
+    window.show()
+    sys.exit(app.exec_())
