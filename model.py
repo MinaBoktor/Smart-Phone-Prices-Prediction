@@ -1,6 +1,4 @@
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.svm import SVC
@@ -11,6 +9,7 @@ from helper import preprocess
 import matplotlib.pyplot as plt
 import seaborn as sns
 from xgboost import XGBClassifier
+from sklearn.inspection import permutation_importance
 
 
 def main():
@@ -40,8 +39,13 @@ def main():
     evaluate(model, X_test, y_test)
 
     model = KNN(X_train, y_train)
-    print("KNN Results:")
+    print(f"KNN Results:")
     evaluate(model, X_test, y_test)
+
+    visualize_knn_importance(model, X_test, y_test)
+
+    #visualize_camera_vs_price(train)
+
 
     model = random_forest(X_train, y_train)
     print("Random Forest Results:")
@@ -74,11 +78,11 @@ def SVM(X_train, y_train):
     return model
 
 
-def KNN(X_train, y_train):
+def KNN(X_train, y_train, metric='manhattan'):
     model = KNeighborsClassifier(
             n_neighbors=3,
             weights='uniform',
-            metric='manhattan',
+            metric=metric,
             algorithm='auto'
         )
 
@@ -124,10 +128,56 @@ def xgboost_model(X_train, y_train):
 
 def evaluate(model, X_test, y_test):
     y_pred = model.predict(X_test)
-
     print("Accuracy:", accuracy_score(y_test, y_pred)*100)
     #print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred))
     #print("Classification Report:\n", classification_report(y_test, y_pred))
+
+
+def visualize_knn_importance(model, X_test, y_test):
+    print("Calculating KNN Permutation Importance... (this may take a moment)")
+    
+    # Calculate permutation importance
+    results = permutation_importance(model, X_test, y_test, n_repeats=10, random_state=42, n_jobs=-1)
+    
+    # Create a DataFrame
+    importance_df = pd.DataFrame({
+        'Feature': X_test.columns,
+        'Importance': results.importances_mean
+    })
+    
+    # Sort by importance and TAKE ONLY THE TOP 20
+    top_20 = importance_df.sort_values(by='Importance', ascending=False).head(20)
+    
+    # Plot
+    plt.figure(figsize=(10, 8))  # Increased height slightly
+    sns.barplot(x='Importance', y='Feature', data=top_20, palette='viridis')
+    plt.title('Top 20 Features driving Price (KNN)')
+    plt.xlabel('Importance (Drop in Accuracy)')
+    plt.tight_layout()
+    plt.show()
+
+
+
+
+    # Print the text version too, just in case
+    print("\n--- Top 10 Features ---")
+    print(top_20.head(10))
+
+
+
+
+def visualize_camera_vs_price(df):
+    plt.figure(figsize=(10, 6))
+    
+    # We use a boxplot to see the price range for each Camera MP count
+    sns.boxplot(x='primary_front_camera_mp', y='price', data=df)
+    
+    plt.title('Does a Better Selfie Camera Mean a Higher Price?')
+    plt.xlabel('Front Camera Megapixels')
+    plt.ylabel('Price Category')
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.show()
 
 
 if __name__ == "__main__":

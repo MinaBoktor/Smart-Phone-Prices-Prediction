@@ -7,11 +7,6 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 
-
-
-
-
-
 def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None):
 
     #Binaray_columns_versus_price_(df)
@@ -71,6 +66,7 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     ])
 
     df["RAM Tier_encoded"] = encoder.fit_transform(df[["RAM Tier"]])
+    df["Performance_Tier_encoded"] = encoder.fit_transform(df[["Performance_Tier"]])
 
 
     # Converting into GBs in memory_card_size
@@ -124,18 +120,14 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     
 
     # Standard Scaling
-    cols_to_scale = numerical_columns + ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded"]
+    cols_to_scale = numerical_columns + ["memory_card_size", "os_version_major", "os_version_minor", "os_version_patch", "RAM Tier_encoded", "Performance_Tier_encoded", "primary_front_camera_mp"]
     
     if train:
-        # LEARN: Create new scaler and fit it on training data
         scaler = StandardScaler()
         df[cols_to_scale] = scaler.fit_transform(df[cols_to_scale])
     else:
-        # APPLY: Use the scaler learned from training (Safety check)
         if scaler is None:
              raise ValueError("Scaler must be provided when train=False!")
-        
-        # Transform test data using the existing scaler's stats
         df[cols_to_scale] = scaler.transform(df[cols_to_scale])
 
     #analysis(df)
@@ -153,7 +145,7 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
 
 
     # Dropping Unnecessary Columns which were encoded and unrelated features
-    unrelated_features = ["rating", "Processor_Series", "os_name", "Dual_Sim", "Vo5G", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "IR_Blaster", "4G",  ]
+    unrelated_features = ["rating", "Processor_Series", "os_name", "Dual_Sim", "Vo5G", "num_rear_cameras", "os_version_patch", "Core_Count", "os_version_minor", "IR_Blaster", "4G", "Performance_Tier_encoded"]
     df = df.drop(manual_encoding+unrelated_features+["RAM Tier", "os_version", "memory_card_size", "Performance_Tier"], axis=1)
 
 
@@ -201,20 +193,20 @@ def analysis(df):
         variability = 1 - top_freq
         print(f"{col}: {variability:.4f}")
 
-        print("\n--- Correlation with Price ---")
-            
-        # Calculate correlation (numeric_only=True prevents errors with any remaining text)
-        correlation = df.corrwith(df['price'], numeric_only=True).sort_values(ascending=False)
+    print("\n--- Correlation with Price ---")
         
-        # Remove 'price' itself from the list
-        if 'price' in correlation:
-            correlation = correlation.drop('price')
-        
-        sorted_correlation = correlation.iloc[correlation.abs().argsort()]
+    # Calculate correlation (numeric_only=True prevents errors with any remaining text)
+    correlation = df.corrwith(df['price'], numeric_only=True).sort_values(ascending=False)
+    
+    # Remove 'price' itself from the list
+    if 'price' in correlation:
+        correlation = correlation.drop('price')
+    
+    sorted_correlation = correlation.iloc[correlation.abs().argsort()]
 
-        # 4. Print
-        with pd.option_context('display.max_rows', None):
-            print(sorted_correlation)
+    # 4. Print
+    with pd.option_context('display.max_rows', None):
+        print(sorted_correlation)
 
 
 if __name__ == "__main__":
