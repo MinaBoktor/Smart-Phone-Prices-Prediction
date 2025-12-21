@@ -1,250 +1,172 @@
-import sys
-import os
-import threading
-import time
-from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
-                             QPushButton, QTextEdit, QStackedWidget, QLabel)
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QObject, QTimer
-from PyQt5.QtGui import QImage, QPixmap
+import pandas as pd
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+from sklearn.svm import SVC
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.ensemble import RandomForestClassifier
+from xgboost import XGBClassifier
+from sklearn.model_selection import GridSearchCV
+from helper import preprocess
+from sklearn.feature_selection import SequentialFeatureSelector
 
-# --- FFPyPlayer for Audio/Video ---
-from ffpyplayer.player import MediaPlayer
 
-import model 
+def main():
+    path = r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction"
 
-# --- 1. Buffered Output Redirector (Fixes Text Lag) ---
-class StreamRedirector(QObject):
-    # We no longer emit signal on every write. We buffer it.
-    def __init__(self):
-        super().__init__()
-        self.buffer = ""
-        self.lock = threading.Lock()
+    train = pd.read_csv(fr"{path}\train.csv")
+    test = pd.read_csv(fr"{path}\test.csv")
 
-    def write(self, text):
-        with self.lock:
-            self.buffer += str(text)
+    train_preprocessed, training_columns, imputation_values, scaler, imputer_artifacts = preprocess(train, train=True)
+    test_preprocessed, _, _, _, _ = preprocess(test, train=False, training_columns=training_columns, imputation_values=imputation_values, scaler=scaler, imputer_artifacts=imputer_artifacts)
 
-    def flush(self):
-        pass
-        
-    def read_and_clear(self):
-        with self.lock:
-            data = self.buffer
-            self.buffer = ""
-        return data
+    # For training
+    X_train = train_preprocessed.drop(["price"], axis=1)
+    y_train = train_preprocessed["price"]
 
-# --- 2. Worker Thread ---
-class TrainingWorker(QThread):
-    finished_signal = pyqtSignal()
+    # For testing
+    X_test = test_preprocessed.drop("price", axis=1)
+    y_test = test_preprocessed["price"]
+
+    best_cols = select_features(X_train, y_train, n_features=30)
+
+    X_train = X_train[best_cols]
+    X_test = X_test[best_cols]
+
+    # --- Training and Tuning Models ---
+
+    print("--- Logistic Regression ---")
+    model = logistic(X_train, y_train)
+    evaluate(model, X_test, y_test)
+
+    print("\n--- SVM ---")
+    model = svm(X_train, y_train)
+    evaluate(model, X_test, y_test)
+
+    print("\n--- KNN ---")
+    model = knn(X_train, y_train)
+    evaluate(model, X_test, y_test)
+
+    print("\n--- Random Forest ---")
+    model = random_forest(X_train, y_train)
+    evaluate(model, X_test, y_test)
+
+    print("\n--- XGBoost ---")
+    model = xgboost(X_train, y_train)
+    evaluate(model, X_test, y_test)
+
+
+def logistic(X_train, y_train):
+    param_grid = [
+        {
+            'solver': ['liblinear'],
+            'penalty': ['l1', 'l2'],
+            'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000],
+            'max_iter': [2000]
+        },
+        {
+            'solver': ['lbfgs', 'newton-cg'],
+            'penalty': ['l2'],
+            'C': [0.001, 0.01, 0.1, 1, 10, 100, 1000],
+            'max_iter': [2000]
+        }
+    ]
+
+    grid_search = GridSearchCV(LogisticRegression(random_state=0), param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    print(f"Best Params (Logistic): {grid_search.best_params_}")
+    return grid_search.best_estimator_
+
+
+def svm(X_train, y_train):
+    param_grid = {
+        'C': [0.1, 1, 10, 100],
+        'kernel': ['linear', 'rbf', 'poly', 'sigmoid'],
+        'gamma': ['scale', 'auto', 0.1, 0.01, 0.001],
+        'degree': [2, 3, 4]
+    }
     
-    def run(self):
-        try:
-            print(">>> SYSTEM: Core Protocols Engaged...", flush=True)
-            print(">>> ALLOCATING RESOURCES: Please wait...", flush=True)
-            # Short sleep to let video start smoothly before heavy load
-            time.sleep(1) 
-            model.main()
-        except Exception as e:
-            print(f"CRITICAL ERROR: {e}", flush=True)
-        finally:
-            self.finished_signal.emit()
+    grid_search = GridSearchCV(SVC(probability=True), param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    print(f"Best Params (SVM): {grid_search.best_params_}")
+    return grid_search.best_estimator_
 
-# --- 3. High-Performance Video Widget ---
-class FFVideoWidget(QLabel):
-    video_finished = pyqtSignal()
 
-    def __init__(self):
-        super().__init__()
-        self.setAlignment(Qt.AlignCenter)
-        self.setStyleSheet("background-color: black;")
-        self.player = None
-        
-        # We poll faster (30ms) to catch frames immediately
-        self.timer = QTimer()
-        self.timer.setInterval(30) 
-        self.timer.timeout.connect(self.update_frame)
+def knn(X_train, y_train):
+    param_grid = {
+        'n_neighbors': [3, 5, 7, 9, 11, 15],
+        'weights': ['uniform', 'distance'],
+        'metric': ['euclidean', 'manhattan']
+    }
 
-    def play(self, path):
-        self.stop()
-        
-        # 'out_fmt': 'rgb24' is fastest for Qt conversion
-        ff_opts = {'out_fmt': 'rgb24'}
-        try:
-            self.player = MediaPlayer(path, ff_opts=ff_opts)
-            self.timer.start()
-        except Exception as e:
-            print(f"Video Error: {e}")
-            self.video_finished.emit()
+    grid_search = GridSearchCV(KNeighborsClassifier(), param_grid, cv=5, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    print(f"Best Params: {grid_search.best_params_}")
+    return grid_search.best_estimator_
 
-    def update_frame(self):
-        if self.player is None:
-            return
 
-        # Grab frame
-        frame, val = self.player.get_frame()
+def random_forest(X_train, y_train):
+    param_grid = {
+        'n_estimators': [50, 100, 200],
+        'max_depth': [None, 10, 20],
+        'min_samples_split': [2, 5],
+        'criterion': ['gini', 'entropy']
+    }
 
-        if val == 'eof':
-            self.stop()
-            self.video_finished.emit()
-            return
-        
-        if frame is not None:
-            img, t = frame
-            w, h = img.get_size()
-            
-            # Fast raw data access
-            data = img.to_bytearray()[0]
-            
-            # Create QImage
-            qimg = QImage(data, w, h, QImage.Format_RGB888)
-            
-            # Scale and Set
-            pixmap = QPixmap.fromImage(qimg).scaled(
-                self.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
-            )
-            self.setPixmap(pixmap)
+    grid_search = GridSearchCV(RandomForestClassifier(random_state=42), param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    print(f"Best Params: {grid_search.best_params_}")
+    return grid_search.best_estimator_
 
-    def stop(self):
-        self.timer.stop()
-        if self.player:
-            self.player.close_player()
-            self.player = None
-        self.clear()
 
-# --- 4. Main Application ---
-class AdvancedApp(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("Smart Phone Price Predictor - AI Core")
-        self.resize(1000, 700)
-        
-        self.setStyleSheet("""
-            QMainWindow { background-color: #0f0f0f; }
-            QPushButton {
-                background-color: #007acc; color: white; border: none;
-                padding: 15px; font-size: 16px; font-weight: bold; border-radius: 5px;
-            }
-            QPushButton:hover { background-color: #005f9e; }
-            QPushButton:disabled { background-color: #333; color: #555; }
-            QTextEdit {
-                background-color: #1e1e1e; color: #00ff00; font-family: Consolas, Monospace;
-                font-size: 14px; border: 1px solid #333;
-            }
-            QLabel { color: white; font-size: 24px; font-weight: bold; }
-        """)
+def xgboost(X_train, y_train):
+    param_grid = {
+        'n_estimators': [100, 300, 600],
+        'learning_rate': [0.01, 0.05, 0.1],
+        'max_depth': [3, 6, 10],
+        'subsample': [0.8, 1.0]
+    }
 
-        self.central_stack = QStackedWidget()
-        self.setCentralWidget(self.central_stack)
+    xgb = XGBClassifier(eval_metric='logloss', random_state=42, use_label_encoder=False)
 
-        # Layers
-        self.video_widget = FFVideoWidget()
-        self.video_widget.video_finished.connect(self.on_media_finished)
-        self.central_stack.addWidget(self.video_widget)
+    grid_search = GridSearchCV(xgb, param_grid, cv=3, scoring='accuracy', n_jobs=-1)
+    grid_search.fit(X_train, y_train)
+    print(f"Best Params: {grid_search.best_params_}")
+    return grid_search.best_estimator_
 
-        self.app_container = QWidget()
-        self.app_layout = QVBoxLayout(self.app_container)
-        
-        self.header_label = QLabel("NEURAL NETWORK COMMAND CENTER")
-        self.header_label.setAlignment(Qt.AlignCenter)
-        self.app_layout.addWidget(self.header_label)
 
-        self.terminal_display = QTextEdit()
-        self.terminal_display.setReadOnly(True)
-        self.app_layout.addWidget(self.terminal_display)
+def evaluate(model, X_test, y_test):
+    y_pred = model.predict(X_test)
+    acc = accuracy_score(y_test, y_pred) * 100
+    print(f"Test Set Accuracy: {acc:.2f}%")
 
-        self.train_btn = QPushButton("INITIALIZE MODEL TRAINING")
-        self.train_btn.clicked.connect(self.start_training)
-        self.app_layout.addWidget(self.train_btn)
 
-        self.central_stack.addWidget(self.app_container)
+def select_features(X, y, n_features=30):
 
-        self.state = "INTRO"
-        self.force_close = False
+    print(f"\n--- Running Sequential Feature Selection (Target: {n_features} features) ---")
+    print("Step 1: Initializing 'Lite' Random Forest...")
 
-        # --- SETUP BUFFERED LOGGING ---
-        self.redirector = StreamRedirector()
-        sys.stdout = self.redirector
-        
-        # GUI Timer to flush text buffer every 100ms
-        self.log_timer = QTimer()
-        self.log_timer.timeout.connect(self.process_logs)
-        self.log_timer.start(100)
+    rf_fast = RandomForestClassifier(
+        n_estimators=10, 
+        max_depth=5, 
+        n_jobs=-1, 
+        random_state=42
+    )
 
-        # START
-        self.play_video("HALO.mp4")
+    sfs = SequentialFeatureSelector(
+        rf_fast,
+        n_features_to_select=n_features,
+        direction='forward',
+        scoring='accuracy',
+        cv=3, 
+        n_jobs=4
+    )
 
-    def play_video(self, filename):
-        path = os.path.abspath(filename)
-        if os.path.exists(path):
-            self.central_stack.setCurrentIndex(0)
-            self.video_widget.play(path)
-        else:
-            print(f"Warning: {filename} missing.")
-            self.on_media_finished()
+    print("Step 2: Fitting SFS (this usually takes 1-3 minutes)...")
+    sfs.fit(X, y)
 
-    def on_media_finished(self):
-        if self.state == "INTRO":
-            self.show_app()
-        elif self.state == "TRAINING":
-            # Loop loading video if worker is still running
-            if self.worker.isRunning():
-                self.play_video("FETCH.mp4")
-            else:
-                self.on_training_finished()
-        elif self.state == "EXIT":
-            self.close_application()
-
-    def show_app(self):
-        self.state = "APP"
-        self.video_widget.stop()
-        self.central_stack.setCurrentIndex(1)
-
-    def start_training(self):
-        self.state = "TRAINING"
-        self.train_btn.setEnabled(False)
-        self.train_btn.setText("TRAINING IN PROGRESS...")
-        
-        self.play_video("FETCH.mp4")
-        
-        self.worker = TrainingWorker()
-        self.worker.finished_signal.connect(self.on_training_finished)
-        self.worker.start()
-
-    def on_training_finished(self):
-        # Only stop if we aren't already stopping
-        if self.state == "TRAINING":
-            self.state = "APP"
-            self.video_widget.stop()
-            self.central_stack.setCurrentIndex(1)
-            self.train_btn.setEnabled(True)
-            self.train_btn.setText("INITIALIZE MODEL TRAINING")
-            print("\n>>> SYSTEM: Training Sequence Complete.")
-
-    def process_logs(self):
-        """Reads buffer and updates GUI in one go"""
-        text = self.redirector.read_and_clear()
-        if text:
-            cursor = self.terminal_display.textCursor()
-            cursor.movePosition(cursor.End)
-            cursor.insertText(text)
-            self.terminal_display.setTextCursor(cursor)
-            self.terminal_display.ensureCursorVisible()
-
-    def closeEvent(self, event):
-        if self.force_close:
-            event.accept()
-        else:
-            event.ignore()
-            self.state = "EXIT"
-            self.play_video("BYE.mp4")
-
-    def close_application(self):
-        self.force_close = True
-        self.video_widget.stop()
-        self.close()
+    selected_features = list(sfs.get_feature_names_out(input_features=X.columns))
+    print(f"Selected Features: {selected_features}")
+    return selected_features
 
 if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = AdvancedApp()
-    window.show()
-    sys.exit(app.exec_())
+    main()

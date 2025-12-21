@@ -12,13 +12,14 @@ from performance_tier_prediction import impute_performance_tier
 
 def preprocess(df, train=True, training_columns=[], imputation_values=None, scaler=None, imputer_artifacts=None):
 
-    #Binaray_columns_versus_price_(df)
+    #Visual_Binary_columns_versus_price(df)
     #unique(df)
+    #analyze_unknown_percentage(df)
+
 
     # Price Binary Encoding
     if "price" in df.columns:
             df["price"] = df["price"].map({'expensive': 1, 'non-expensive': 0})
-
 
 
     numerical_columns=['rating','Processor_Series','Core_Count', 'Clock_Speed_GHz','RAM Size GB','Storage Size GB','battery_capacity', 'fast_charging_power' , 'Screen_Size','Resolution_Width','Resolution_Height','Refresh_Rate','primary_rear_camera_mp','num_rear_cameras','primary_front_camera_mp','num_front_cameras']
@@ -111,7 +112,11 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
              raise ValueError("Scaler must be provided when train=False!")
         df[cols_to_scale] = scaler.transform(df[cols_to_scale])
 
-    #analysis(df)
+    # Analyze Data
+
+    #analyze_categorical_variability(df)
+
+    #analyze_price_correlation(df)
 
     # One Hot Key Encoding (The condition train indicates whether we are processing training data or test data)
     one_hot_key = ["Processor_Brand", "Notch_Type", "brand", "os_name"]
@@ -133,25 +138,55 @@ def preprocess(df, train=True, training_columns=[], imputation_values=None, scal
     return df, training_columns, imputation_values, scaler, imputer_artifacts
 
 
-def Binaray_columns_versus_price_(df):
+def Visual_Binary_columns_versus_price(df):
     target_col = 'price'
     feature_cols = ['Dual_Sim', '4G', '5G', 'Vo5G', 'NFC', 'memory_card_support', 'IR_Blaster']
-
-    # Print a Header for readability
-    print(f"{'Feature':<15} | {'Yes -> Expensive':<18} | {'No -> Non-Expensive':<18}")
-    print("-" * 60)
+    
+    data_list = []
 
     for feature in feature_cols:
-        # Calculate percentages
         ct = pd.crosstab(df[feature], df[target_col], normalize='index')
 
-        # Extract values safely (returns 0 if specific key is missing)
-        yes_score = ct.loc['Yes', 'expensive'] if 'Yes' in ct.index else 0
-        no_score = ct.loc['No', 'non-expensive'] if 'No' in ct.index else 0
+        yes_score = 0
+        if 'Yes' in ct.index and 'expensive' in ct.columns:
+            yes_score = ct.loc['Yes', 'expensive']
+            
+        no_score = 0
+        if 'No' in ct.index and 'non-expensive' in ct.columns:
+            no_score = ct.loc['No', 'non-expensive']
 
-        # Print immediately
-        print(f"{feature:<15} | {yes_score:.1%}              | {no_score:.1%}")
+        data_list.append({
+            'Feature': feature,
+            'Yes -> Expensive': yes_score,
+            'No -> Non-Expensive': no_score
+        })
 
+    plot_df = pd.DataFrame(data_list)
+
+    plot_df_melted = plot_df.melt(id_vars='Feature', var_name='Metric', value_name='Percentage')
+
+    plt.figure(figsize=(12, 6))
+    sns.set_style("whitegrid")
+
+    ax = sns.barplot(
+        data=plot_df_melted, 
+        x='Feature', 
+        y='Percentage', 
+        hue='Metric', 
+        palette=['#1f77b4', '#ff7f0e']
+    )
+
+    plt.title('Impact of Binary Features on Price', fontsize=16)
+    plt.ylabel('Percentage', fontsize=12)
+    plt.xlabel('Feature', fontsize=12)
+    plt.ylim(0, 1.15)
+    plt.xticks(rotation=45)
+
+    for container in ax.containers:
+        ax.bar_label(container, fmt='%.1f%%', padding=3, fontsize=10)
+
+    plt.tight_layout()
+    plt.show()
 
 def unique(df):
     # Set pandas to display the full list without truncating (optional but helpful)
@@ -165,34 +200,99 @@ def unique(df):
         print("\n") # Adds a blank line for readability
 
 
-def analysis(df):
+sns.set_theme(style="whitegrid")
 
-    unknown_percentages = (df.eq("Unknown").sum() / len(df)) * 100
-    print(unknown_percentages)
+def analyze_unknown_percentage(df):
 
-    categorical_cols = df.select_dtypes(include=['object'])
+    # Calculate percentage
+    unknown_counts = df.eq("Unknown").sum()
+    unknown_percentages = (unknown_counts / len(df)) * 100
+    
+    # Filter out columns with 0% unknowns to keep the chart clean
+    unknown_percentages = unknown_percentages[unknown_percentages > 0].sort_values(ascending=False)
+    
+    if unknown_percentages.empty:
+        print("No 'Unknown' values found in the DataFrame.")
+        return
+
+    # Visualization
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=unknown_percentages.index, y=unknown_percentages.values, palette="Reds_r")
+    
+    plt.title("Percentage of 'Unknown' Values by Column", fontsize=15)
+    plt.ylabel("Percentage (%)")
+    plt.xlabel("Columns")
+    plt.xticks(rotation=45, ha='right') # Rotate labels if there are many columns
+    plt.tight_layout()
+    plt.show()
+
+def analyze_categorical_variability(df):
+
+    categorical_cols = df.select_dtypes(include=['object']).columns
+    variability_data = {}
+
     for col in categorical_cols:
-        top_freq = df[col].value_counts(normalize=True).iloc[0]
-        variability = 1 - top_freq
-        print(f"{col}: {variability:.4f}")
+        if not df[col].empty:
+            top_freq = df[col].value_counts(normalize=True).iloc[0]
+            variability_data[col] = 1 - top_freq
+    
+    # Create a Series for plotting
+    variability_series = pd.Series(variability_data).sort_values(ascending=False)
 
-    print("\n--- Correlation with Price ---")
+    if variability_series.empty:
+        print("No categorical columns found.")
+        return
+
+    # Visualization
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=variability_series.values, y=variability_series.index, palette="viridis")
+    
+    plt.title("Categorical Column Variability", fontsize=15)
+    plt.xlabel("Variability Score (0 to 1)")
+    plt.ylabel("Categorical Columns")
+    plt.xlim(0, 1) # Fix x-axis from 0 to 1 since it's a probability
+    plt.tight_layout()
+    plt.show()
+
+
+
+def analyze_price_correlation(df, target_col='price'):
+
+    # Check if target exists
+    if target_col not in df.columns:
+        print(f"Column '{target_col}' not found in DataFrame.")
+        return
+
+    # Calculate correlation
+    correlation = df.corrwith(df[target_col], numeric_only=True)
+    
+    # Drop the target column itself (correlation of 1.0 is useless info)
+    if target_col in correlation:
+        correlation = correlation.drop(target_col)
         
-    # Calculate correlation (numeric_only=True prevents errors with any remaining text)
-    correlation = df.corrwith(df['price'], numeric_only=True).sort_values(ascending=False)
-    
-    # Remove 'price' itself from the list
-    if 'price' in correlation:
-        correlation = correlation.drop('price')
-    
-    sorted_correlation = correlation.iloc[correlation.abs().argsort()]
+    # Sort values for a clean wave-like chart
+    correlation = correlation.sort_values()
 
-    # 4. Print
-    with pd.option_context('display.max_rows', None):
-        print(sorted_correlation)
+    if correlation.empty:
+        print("No numeric columns found to correlate.")
+        return
+
+    # Visualization
+    plt.figure(figsize=(10, 8))
+    
+    # Create a color map: Blue for negative corr, Red for positive corr
+    colors = ['#ef5350' if x > 0 else '#42a5f5' for x in correlation.values]
+    
+    sns.barplot(x=correlation.values, y=correlation.index, palette=colors)
+    
+    plt.title(f"Feature Correlation with '{target_col}'", fontsize=15)
+    plt.xlabel("Correlation Coefficient")
+    plt.axvline(0, color='black', linewidth=1) # Add a line at 0 for reference
+    plt.tight_layout()
+    plt.show()
 
 
 if __name__ == "__main__":
     df=pd.read_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\train.csv")
-    df, _, _, _ = preprocess(df, train=True)
+    df, _, _, _, _ = preprocess(df, train=True)
     df.to_csv(r"C:\Users\RexoL\source\repos\Smart-Phone-Prices-Prediction\preproccessed_train.csv", index=False)

@@ -4,72 +4,53 @@ from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.preprocessing import LabelEncoder
 
 def impute_performance_tier(df, artifacts=None):
-    """
-    If artifacts is None (Train mode):
-       - Fits a model on known data.
-       - Returns the df and the new artifacts (model, encoder, feature_names).
-    If artifacts is provided (Test mode):
-       - Uses the stored model, encoder, and feature structure to predict.
-       - Returns the df and the SAME artifacts.
-    """
+
     print("Starting Performance_Tier imputation...")
-    
+
     work_df = df.copy()
 
     # 1. Clean Target
     work_df['Performance_Tier_clean'] = work_df['Performance_Tier'].astype(str).str.lower().str.strip()
     unknown_tokens = ['unknown', 'nan', 'none', '']
-    
+
     # 2. Clean RAM Tier
     work_df['RAM_Tier_clean'] = work_df['RAM Tier'].astype(str).str.lower().str.strip()
     ram_map = {
-        'budget': 0, 'mid-range': 1, 'high-end': 2, 'flagship': 3, 
+        'budget': 0, 'mid-range': 1, 'high-end': 2, 'flagship': 3,
         'unknown': -1, 'nan': -1
     }
     work_df['ram_tier_numeric'] = work_df['RAM_Tier_clean'].map(ram_map).fillna(-1)
 
     # 3. Clean Processor Series & Encode
     work_df['Processor_Series'] = work_df['Processor_Series'].fillna("unknown").astype(str)
-    
+
     if artifacts is None:
-        # TRAIN MODE: Fit a new encoder
         le_series = LabelEncoder()
         work_df['series_encoded'] = le_series.fit_transform(work_df['Processor_Series'])
     else:
-        # TEST MODE: Use the existing encoder
         le_series = artifacts['encoder']
-        
-        # Handle unseen labels safely
+
         known_classes = set(le_series.classes_)
         work_df['Processor_Series'] = work_df['Processor_Series'].apply(lambda x: x if x in known_classes else le_series.classes_[0])
         work_df['series_encoded'] = le_series.transform(work_df['Processor_Series'])
 
-    # Brand Dummies
     brand_dummies = pd.get_dummies(work_df['Processor_Brand'], prefix='Brand')
 
     features = [
-        'Clock_Speed_GHz', 'RAM Size GB', 'Core_Count', 
-        'Refresh_Rate', 'fast_charging_power', 
+        'Clock_Speed_GHz', 'RAM Size GB', 'Core_Count',
+        'Refresh_Rate', 'fast_charging_power',
         'Screen_Size', 'Resolution_Width',
         'series_encoded', 'ram_tier_numeric'
     ]
 
-    # Combine features
     X = pd.concat([work_df[features], brand_dummies], axis=1)
-    X = X.fillna(-1) # Safety fill
+    X = X.fillna(-1)
 
-    # --- FEATURE ALIGNMENT (The Fix) ---
     if artifacts is None:
-        # TRAIN MODE: Save the feature names
         feature_names = X.columns.tolist()
     else:
-        # TEST MODE: Enforce the exact same columns as Training
         feature_names = artifacts['features']
-        
-        # Reindex will:
-        # 1. Add missing columns (like 'Brand_kirin') filled with 0
-        # 2. Drop extra columns (brands in test but not in train)
-        # 3. Sort columns in the correct order
+
         X = X.reindex(columns=feature_names, fill_value=0)
 
     # --- Prediction Logic ---
@@ -78,21 +59,18 @@ def impute_performance_tier(df, artifacts=None):
     X_unknown = X[is_unknown]
 
     if artifacts is None:
-        # === TRAIN MODE ===
         X_known = X[~is_unknown]
         y_known = y[~is_unknown]
-        
+
         hgb = HistGradientBoostingClassifier(max_iter=200, random_state=42)
         hgb.fit(X_known, y_known)
-        
-        # Save artifacts (including feature names!)
+
         artifacts = {
-            'model': hgb, 
+            'model': hgb,
             'encoder': le_series,
             'features': feature_names
         }
     else:
-        # === TEST MODE ===
         hgb = artifacts['model']
 
     # Predict if we have unknowns
