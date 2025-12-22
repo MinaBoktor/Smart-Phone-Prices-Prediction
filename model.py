@@ -1,6 +1,6 @@
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
 from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.ensemble import RandomForestClassifier
@@ -8,6 +8,9 @@ from xgboost import XGBClassifier
 from sklearn.model_selection import GridSearchCV
 from helper import preprocess
 from sklearn.feature_selection import SequentialFeatureSelector
+
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def main():
@@ -137,6 +140,8 @@ def xgboost(X_train, y_train):
 def evaluate(model, X_test, y_test):
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred) * 100
+    print("Confusion Matrix: \n", confusion_matrix(y_test, y_pred))
+    print("Classification Report: \n", classification_report(y_test, y_pred))
     print(f"Test Set Accuracy: {acc:.2f}%")
 
 

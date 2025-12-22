@@ -16,8 +16,8 @@ def impute_performance_tier(df, artifacts=None):
     # 2. Clean RAM Tier
     work_df['RAM_Tier_clean'] = work_df['RAM Tier'].astype(str).str.lower().str.strip()
     ram_map = {
-        'budget': 0, 'mid-range': 1, 'high-end': 2, 'flagship': 3,
-        'unknown': -1, 'nan': -1
+        'budget': 1, 'mid-range': 2, 'high-end': 3, 'flagship': 4,
+        'unknown': 0
     }
     work_df['ram_tier_numeric'] = work_df['RAM_Tier_clean'].map(ram_map).fillna(-1)
 
